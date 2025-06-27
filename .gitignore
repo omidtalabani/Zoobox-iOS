@@ -22,3 +22,4 @@ fastlane/screenshots/**/*.png
 
 # Others
 .DS_Store
+.DS_Store
