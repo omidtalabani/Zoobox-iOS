@@ -159,22 +159,16 @@ class MainViewController: UIViewController {
     
     // MARK: - UI Helper Methods
     private func showLoading(_ show: Bool, message: String = "Loading...") {
-        DispatchQueue.main.async {
-            if show {
-                self.loadingIndicator.startAnimating()
-                self.statusLabel.text = message
-                self.statusLabel.isHidden = false
-                self.view.bringSubviewToFront(self.loadingIndicator)
-                self.view.bringSubviewToFront(self.statusLabel)
-            } else {
-                self.loadingIndicator.stopAnimating()
-                self.statusLabel.isHidden = true
-            }
+        if show {
+            showLoadingOverlay(message: message)
+        } else {
+            hideLoadingOverlay()
         }
     }
     
     private func showError(_ error: Error, retryAction: @escaping () -> Void) {
-        ErrorManager.shared.handleWebViewError(error, in: self, retryAction: retryAction)
+        hideLoadingOverlay()
+        ErrorViewController.presentWebViewError(error, in: self, retryAction: retryAction)
     }
     
     private func performNetworkDiagnostics() {
@@ -285,10 +279,14 @@ extension MainViewController: NetworkMonitorDelegate {
                 // Connection restored - reload if needed
                 if self.webViewManager.webView.url == nil {
                     self.loadMainSite()
+                } else {
+                    self.hideLoadingOverlay()
                 }
             } else {
-                // Connection lost - show status
-                self.showLoading(true, message: "No internet connection.\nTrying to reconnect...")
+                // Connection lost - show enhanced error
+                ErrorViewController.presentNetworkError(in: self) {
+                    self.loadMainSite()
+                }
             }
         }
     }
