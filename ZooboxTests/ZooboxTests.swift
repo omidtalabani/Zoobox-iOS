@@ -74,5 +74,48 @@ struct ZooboxTests {
         #expect(NetworkMonitor.ConnectionType.ethernet.description == "Ethernet")
         #expect(NetworkMonitor.ConnectionType.unknown.description == "Unknown")
     }
+    
+    @Test func testNotificationManagerInitialization() async throws {
+        let notificationManager = NotificationManager()
+        
+        // Test that notification manager initializes without errors
+        #expect(notificationManager != nil)
+        #expect(notificationManager.deviceToken == nil) // Should be nil until registration
+    }
+    
+    @Test func testAppStateManagerInitialization() async throws {
+        let appStateManager = AppStateManager()
+        
+        // Test that app state manager initializes without errors
+        #expect(appStateManager != nil)
+        #expect(appStateManager.isActive == true)
+        #expect(appStateManager.isInBackground == false)
+        #expect(appStateManager.sessionStartTime != nil)
+    }
+    
+    @Test func testAppStateManagerSessionManagement() async throws {
+        let appStateManager = AppStateManager()
+        
+        // Test session duration
+        let duration = appStateManager.getSessionDuration()
+        #expect(duration >= 0)
+        
+        // Test session extension
+        let originalStart = appStateManager.sessionStartTime
+        appStateManager.extendSession()
+        #expect(appStateManager.sessionStartTime != originalStart)
+    }
+    
+    @Test func testNotificationManagerHelperMethods() async throws {
+        let notificationManager = NotificationManager()
+        
+        // Test notification permission status
+        let status = notificationManager.getNotificationPermissionStatus()
+        #expect(status == .notDetermined || status == .denied || status == .authorized)
+        
+        // Test badge count update (won't crash)
+        notificationManager.updateBadgeCount(5)
+        #expect(true) // If we get here, the method didn't crash
+    }
 
 }

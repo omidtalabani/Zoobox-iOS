@@ -83,6 +83,73 @@ class MainViewController: UIViewController {
         // Initialize Location Manager
         locationManager = LocationManager()
         locationManager.delegate = self
+        
+        // Setup notification observers for app state changes
+        setupNotificationObservers()
+    }
+    
+    private func setupNotificationObservers() {
+        // Listen for app state changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionExpired),
+            name: NSNotification.Name("SessionExpired"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRestoreURL),
+            name: NSNotification.Name("RestoreWebViewURL"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCheckForUpdates),
+            name: NSNotification.Name("CheckForUpdates"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePauseOperations),
+            name: NSNotification.Name("PauseOperations"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleResumeOperations),
+            name: NSNotification.Name("ResumeOperations"),
+            object: nil
+        )
+        
+        // Listen for notification actions
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleNotificationTapped(_:)),
+            name: NSNotification.Name("NotificationTapped"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTrackOrder(_:)),
+            name: NSNotification.Name("TrackOrder"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDeliveryUpdate(_:)),
+            name: NSNotification.Name("DeliveryUpdate"),
+            object: nil
+        )
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     private func loadMainSite() {
@@ -107,25 +174,7 @@ class MainViewController: UIViewController {
     }
     
     private func showError(_ error: Error, retryAction: @escaping () -> Void) {
-        DispatchQueue.main.async {
-            let alert = UIAlertController(
-                title: "Connection Error",
-                message: error.localizedDescription,
-                preferredStyle: .alert
-            )
-            
-            alert.addAction(UIAlertAction(title: "Retry", style: .default) { _ in
-                retryAction()
-            })
-            
-            alert.addAction(UIAlertAction(title: "Check Network", style: .default) { _ in
-                self.performNetworkDiagnostics()
-            })
-            
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            
-            self.present(alert, animated: true)
-        }
+        ErrorManager.shared.handleWebViewError(error, in: self, retryAction: retryAction)
     }
     
     private func performNetworkDiagnostics() {
@@ -165,6 +214,33 @@ class MainViewController: UIViewController {
                 }
             })
         }
+        
+        alert.addAction(UIAlertAction(title: "Diagnostics", style: .default) { _ in
+            self.showDiagnostics()
+        })
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        present(alert, animated: true)
+    }
+    
+    private func showDiagnostics() {
+        let diagnostics = ErrorManager.shared.getDiagnosticInfo()
+        let message = """
+        Network: \(diagnostics["network_status"] ?? "Unknown")
+        Memory: \(diagnostics["memory_usage"] ?? "Unknown")
+        Storage: \(diagnostics["storage_available"] ?? "Unknown")
+        Errors: \(diagnostics["error_count"] ?? 0)
+        """
+        
+        let alert = UIAlertController(
+            title: "App Diagnostics",
+            message: message,
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Share Report", style: .default) { _ in
+            ErrorManager.shared.shareErrorReport(from: self)
+        })
         
         alert.addAction(UIAlertAction(title: "OK", style: .cancel))
         present(alert, animated: true)
@@ -246,6 +322,114 @@ extension MainViewController: LocationManagerDelegate {
             locationManager.stopLocationTracking()
         default:
             break
+        }
+    }
+}
+
+// MARK: - Notification Handlers
+extension MainViewController {
+    
+    @objc private func handleSessionExpired() {
+        DispatchQueue.main.async {
+            // Session expired - reload the app
+            self.loadMainSite()
+        }
+    }
+    
+    @objc private func handleRestoreURL(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let urlString = userInfo["url"] as? String else { return }
+        
+        DispatchQueue.main.async {
+            self.webViewManager.loadURL(urlString)
+        }
+    }
+    
+    @objc private func handleCheckForUpdates() {
+        DispatchQueue.main.async {
+            // Refresh the current page to check for updates
+            self.webViewManager.reload()
+        }
+    }
+    
+    @objc private func handlePauseOperations() {
+        // Pause location tracking and other intensive operations
+        locationManager.stopLocationTracking()
+        networkMonitor.stopMonitoring()
+    }
+    
+    @objc private func handleResumeOperations() {
+        // Resume operations when app becomes active
+        networkMonitor.startMonitoring()
+        
+        // Resume location tracking if permissions are granted
+        let status = CLLocationManager.authorizationStatus()
+        if status == .authorizedAlways || status == .authorizedWhenInUse {
+            locationManager.startLocationTracking(background: status == .authorizedAlways)
+        }
+    }
+    
+    @objc private func handleNotificationTapped(_ notification: Notification) {
+        guard let userInfo = notification.userInfo else { return }
+        
+        DispatchQueue.main.async {
+            // Handle general notification tap
+            if let orderId = userInfo["orderId"] as? String {
+                self.navigateToOrder(orderId)
+            } else if let url = userInfo["url"] as? String {
+                self.webViewManager.loadURL(url)
+            }
+        }
+    }
+    
+    @objc private func handleTrackOrder(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let orderId = userInfo["orderId"] as? String else { return }
+        
+        DispatchQueue.main.async {
+            self.navigateToOrder(orderId)
+        }
+    }
+    
+    @objc private func handleDeliveryUpdate(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let orderId = userInfo["orderId"] as? String,
+              let status = userInfo["status"] as? String else { return }
+        
+        DispatchQueue.main.async {
+            // Send delivery update to web application
+            let script = """
+            if (window.onDeliveryUpdate) {
+                window.onDeliveryUpdate({
+                    orderId: '\(orderId)',
+                    status: '\(status)'
+                });
+            }
+            """
+            
+            self.webViewManager.evaluateJavaScript(script) { result, error in
+                if let error = error {
+                    print("Failed to send delivery update to web: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func navigateToOrder(_ orderId: String) {
+        // Navigate to order tracking page
+        let script = """
+        if (window.navigateToOrder) {
+            window.navigateToOrder('\(orderId)');
+        } else {
+            // Fallback - try to navigate to a order URL
+            window.location.href = '/order/\(orderId)';
+        }
+        """
+        
+        webViewManager.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("Failed to navigate to order: \(error)")
+            }
         }
     }
 }
