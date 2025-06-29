@@ -42,20 +42,35 @@ class PermissionViewController: UIViewController, CLLocationManagerDelegate {
         requestLocationPermission()
     }
     
+    // 🚩 FIXED LOCATION PERMISSION FLOW
     private func requestLocationPermission() {
         locationManager.delegate = self
         let status = CLLocationManager.authorizationStatus()
         if status == .notDetermined {
-            locationManager.requestAlwaysAuthorization()
+            // ✅ FIRST request when-in-use authorization
+            locationManager.requestWhenInUseAuthorization()
         } else {
             locationGranted = (status == .authorizedAlways || status == .authorizedWhenInUse)
             requestCameraPermission()
         }
     }
     
+    // 🚩 FIXED CALLBACK
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         locationGranted = (status == .authorizedAlways || status == .authorizedWhenInUse)
-        requestCameraPermission()
+        
+        // ✅ THEN request always authorization if you need it
+        if status == .authorizedWhenInUse {
+            // Optional: Request always authorization after getting when-in-use
+            // locationManager.requestAlwaysAuthorization()
+            // For now, proceed with camera permission
+            requestCameraPermission()
+        } else if status == .authorizedAlways {
+            requestCameraPermission()
+        } else if status == .denied || status == .restricted {
+            locationGranted = false
+            requestCameraPermission()
+        }
     }
     
     private func requestCameraPermission() {
@@ -131,5 +146,6 @@ class PermissionViewController: UIViewController, CLLocationManagerDelegate {
         self.present(mainVC, animated: true)
     }
 }
+
 
 
