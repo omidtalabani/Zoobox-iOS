@@ -83,7 +83,12 @@ class LocationManager: NSObject {
     }
     
     // MARK: - Public Methods
-    
+
+    /// Expose standard API (for MainViewController) // ⭐️
+    func requestWhenInUseAuthorization() {
+        locationManager.requestWhenInUseAuthorization()
+    }
+
     /// Request location permissions
     func requestLocationPermission() {
         let status = CLLocationManager.authorizationStatus()

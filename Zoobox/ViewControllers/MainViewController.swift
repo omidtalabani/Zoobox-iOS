@@ -2,13 +2,10 @@ import UIKit
 import WebKit
 import CoreLocation
 
-// Use your custom delegate protocol
 class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, LocationManagerDelegate {
     var webView: WKWebView!
-    // Use your singleton
     private let locationManager = LocationManager.shared
     
-    // Haptic feedback generators
     private let lightImpactFeedback = UIImpactFeedbackGenerator(style: .light)
     private let mediumImpactFeedback = UIImpactFeedbackGenerator(style: .medium)
     private let heavyImpactFeedback = UIImpactFeedbackGenerator(style: .heavy)
@@ -29,21 +26,12 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
     
     private func setupWebView() {
         let webConfiguration = WKWebViewConfiguration()
-        
-        // 1. Cookie Persistence Configuration
         webConfiguration.websiteDataStore = WKWebsiteDataStore.default()
-        
-        // Enable cookies
         webConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = true
         webConfiguration.preferences.javaScriptEnabled = true
         
-        // 2. Geolocation Support
-        webConfiguration.preferences.setValue(true, forKey: "allowsInlineMediaPlayback")
-        
-        // 3. JavaScript Injection Setup
+        // DO NOT use setValue for allowsInlineMediaPlayback!
         let userContentController = WKUserContentController()
-        
-        // Add JavaScript message handlers
         userContentController.add(self, name: "hapticFeedback")
         userContentController.add(self, name: "locationRequest")
         userContentController.add(self, name: "startRealTimeLocation")
@@ -51,7 +39,7 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         userContentController.add(self, name: "injectLocation")
         userContentController.add(self, name: "nativeMessage")
         
-        // Enhanced JavaScript Bridge and geolocation override
+        // --- JavaScript injection string, unchanged, can be refactored if needed ---
         let jsSource = """
             // Enhanced JavaScript Bridge
             window.ZooboxBridge = {
@@ -77,7 +65,6 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
                     window.webkit.messageHandlers.nativeMessage.postMessage(message);
                 }
             };
-            
             // Override geolocation API with native location
             if (navigator.geolocation) {
                 // Override getCurrentPosition
@@ -87,7 +74,6 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
                     window.lastLocationCallback = success;
                     window.lastLocationErrorCallback = error;
                 };
-                
                 // Override watchPosition
                 navigator.geolocation.watchPosition = function(success, error, options) {
                     window.ZooboxBridge.startRealTimeLocation();
@@ -96,45 +82,36 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
                     window.locationWatchErrorCallback = error;
                     return 1; // Return a watch ID
                 };
-                
                 // Override clearWatch
                 navigator.geolocation.clearWatch = function(watchId) {
                     window.ZooboxBridge.stopRealTimeLocation();
                 };
             }
-            
             // Auto-inject location on page load
             window.addEventListener('DOMContentLoaded', function() {
                 window.ZooboxBridge.injectLocation();
             });
-            
             // Add haptic feedback to common interactions
             document.addEventListener('click', function(e) {
                 window.ZooboxBridge.triggerHaptic('light');
             });
-            
             document.addEventListener('DOMContentLoaded', function() {
                 window.ZooboxBridge.triggerHaptic('medium');
             });
         """
-        
         let userScript = WKUserScript(source: jsSource, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
         userContentController.addUserScript(userScript)
-        
         webConfiguration.userContentController = userContentController
-        
-        // Create WebView with enhanced configuration
+
         webView = WKWebView(frame: .zero, configuration: webConfiguration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
-        
-        // Allow inline media playback
+
         webView.configuration.allowsInlineMediaPlayback = true
         webView.configuration.mediaTypesRequiringUserActionForPlayback = []
         
         view.addSubview(webView)
-        
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.topAnchor),
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -239,14 +216,12 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
     // MARK: - New Real-time Location Handlers
     private func handleStartRealTimeLocation() {
         print("🗺️ Starting real-time location tracking from WebView")
-        locationManager.startRealTimeTracking(interval: 5.0) // Update every 5 seconds
+        locationManager.startRealTimeTracking(interval: 5.0)
     }
-    
     private func handleStopRealTimeLocation() {
         print("🗺️ Stopping real-time location tracking from WebView")
         locationManager.stopRealTimeTracking()
     }
-    
     private func handleInjectLocation() {
         print("🗺️ Injecting location into WebView")
         locationManager.getCurrentLocation { [weak self] location, error in
@@ -272,8 +247,8 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
             "speed": location.speed,
             "timestamp": location.timestamp.timeIntervalSince1970 * 1000
         ]
-        let jsonData = try! JSONSerialization.data(withJSONObject: locationData)
-        let jsonString = String(data: jsonData, encoding: .utf8)!
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: locationData),
+              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
         
         let jsCode = """
             // Inject location data globally
@@ -294,7 +269,6 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
                     timestamp: \(location.timestamp.timeIntervalSince1970 * 1000)
                 });
             }
-            
             // Trigger watch callback if exists
             if (window.locationWatchCallback) {
                 window.locationWatchCallback({
@@ -310,7 +284,6 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
                     timestamp: \(location.timestamp.timeIntervalSince1970 * 1000)
                 });
             }
-            
             // Dispatch custom event
             window.dispatchEvent(new CustomEvent('nativeLocationUpdate', {
                 detail: {
@@ -319,17 +292,14 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
                     accuracy: \(location.horizontalAccuracy)
                 }
             }));
-            
             console.log('📍 Location injected:', \(location.coordinate.latitude), \(location.coordinate.longitude));
         """
-        
         webView.evaluateJavaScript(jsCode) { _, error in
             if let error = error {
                 print("🗺️ Error injecting location: \(error)")
             }
         }
     }
-    
     private func injectLocationErrorToWebView(error: Error) {
         let jsCode = """
             if (window.lastLocationErrorCallback) {
@@ -346,19 +316,17 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         webView.evaluateJavaScript(jsCode, completionHandler: nil)
     }
     
-    // MARK: - LocationManagerDelegate
+    // MARK: - LocationManagerDelegate (ALL required methods)
     func locationManager(_ manager: LocationManager, didUpdateLocation location: CLLocation) {
         injectLocationToWebView(location: location)
         mediumImpactFeedback.impactOccurred()
     }
-    
     func locationManager(_ manager: LocationManager, didFailWithError error: Error) {
         print("Location error: \(error)")
         heavyImpactFeedback.impactOccurred()
         injectLocationErrorToWebView(error: error)
     }
-    
-    func locationManager(_ manager: LocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+    func locationManager(_ manager: LocationManager, didChangeAuthorizationStatus status: CLAuthorizationStatus) {
         switch status {
         case .authorizedWhenInUse, .authorizedAlways:
             locationManager.getCurrentLocation { [weak self] location, error in
@@ -376,18 +344,17 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
             break
         }
     }
+    func locationManager(_ manager: LocationManager, didUpdateLocationStatus status: LocationStatus) {
+        // You can handle UI/logic here as you like
+        print("Location status updated: \(status)")
+    }
     
     // MARK: - WKNavigationDelegate (Enhanced)
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        // Trigger haptic feedback on navigation start
         lightImpactFeedback.impactOccurred()
     }
-    
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Trigger haptic feedback on successful load
         mediumImpactFeedback.impactOccurred()
-        
-        // Inject additional JavaScript after page load if needed
         let jsCode = """
             console.log('Zoobox WebView loaded successfully');
             if (window.ZooboxBridge) {
@@ -396,14 +363,12 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         """
         webView.evaluateJavaScript(jsCode) { _, _ in }
     }
-    
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        heavyImpactFeedback.impactOccurred() // Error haptic feedback
+        heavyImpactFeedback.impactOccurred()
         showError(error)
     }
-    
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        heavyImpactFeedback.impactOccurred() // Error haptic feedback
+        heavyImpactFeedback.impactOccurred()
         showError(error)
     }
     
@@ -411,7 +376,6 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(.grant)
     }
-    
     func webView(_ webView: WKWebView, requestDeviceOrientationAndMotionPermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(.grant)
     }
@@ -424,23 +388,19 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         present(alert, animated: true)
     }
     
-    // MARK: - Cookie Management Methods
+    // MARK: - Cookie Management Methods (Optional)
     private func saveCookies() {
         webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
-            // Save cookies to UserDefaults or Keychain if needed
             for cookie in cookies {
                 print("Cookie: \(cookie.name) = \(cookie.value)")
             }
         }
     }
-    
     private func loadSavedCookies() {
-        // Load and set any saved cookies
-        // This would retrieve cookies from UserDefaults or Keychain
+        // Optional: implement cookie loading here
     }
     
     deinit {
-        // Clean up
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "hapticFeedback")
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "locationRequest")
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "startRealTimeLocation")
