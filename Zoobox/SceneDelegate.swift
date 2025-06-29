@@ -3,14 +3,16 @@ import UIKit
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
-    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+    func scene(_ scene: UIScene,
+               willConnectTo session: UISceneSession,
+               options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = (scene as? UIWindowScene) else { return }
 
         window = UIWindow(windowScene: windowScene)
 
-        // Start with CameraViewController for camera permission testing
-        let cameraViewController = CameraViewController()
-        window?.rootViewController = cameraViewController
+        // Set MainViewController as the root so your WebView loads at launch
+        let mainViewController = MainViewController()
+        window?.rootViewController = mainViewController
         window?.makeKeyAndVisible()
     }
 

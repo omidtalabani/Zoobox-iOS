@@ -6,13 +6,12 @@ import MobileCoreServices
 class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, LocationManagerDelegate {
     var webView: WKWebView!
     private let locationManager = LocationManager.shared
-
     private let lightImpactFeedback = UIImpactFeedbackGenerator(style: .light)
     private let mediumImpactFeedback = UIImpactFeedbackGenerator(style: .medium)
     private let heavyImpactFeedback = UIImpactFeedbackGenerator(style: .heavy)
     
     private var fileUploadCompletionHandler: (([URL]?) -> Void)?
-
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         setupLocationManager()
@@ -249,18 +248,16 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         webView.evaluateJavaScript(jsCode, completionHandler: nil)
     }
     
-    // MARK: - LocationManagerDelegate
+    // MARK: - LocationManagerDelegate (All five methods)
     func locationManager(_ manager: LocationManager, didUpdateLocation location: CLLocation) {
         injectLocationToWebView(location: location)
         mediumImpactFeedback.impactOccurred()
     }
-
     func locationManager(_ manager: LocationManager, didFailWithError error: Error) {
         print("Location error: \(error)")
         heavyImpactFeedback.impactOccurred()
         injectLocationErrorToWebView(error: error)
     }
-
     func locationManager(_ manager: LocationManager, didChangeAuthorizationStatus status: CLAuthorizationStatus) {
         switch status {
         case .authorizedWhenInUse, .authorizedAlways:
@@ -279,9 +276,12 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
             break
         }
     }
-
     func locationManager(_ manager: LocationManager, didUpdateLocationStatus status: LocationStatus) {
         print("Location status updated: \(status)")
+    }
+    // ⭐️ Fifth required method
+    func locationManagerRequiresPermissionAlert(_ manager: LocationManager) {
+        showLocationPermissionAlert()
     }
     
     // MARK: - WKNavigationDelegate
@@ -400,5 +400,6 @@ extension MainViewController: UIImagePickerControllerDelegate, UINavigationContr
         fileUploadCompletionHandler?(nil)
     }
 }
+
 
 
