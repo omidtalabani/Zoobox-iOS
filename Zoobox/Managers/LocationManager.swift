@@ -1,11 +1,14 @@
 import CoreLocation
 import Foundation
+import UIKit
 
 protocol LocationManagerDelegate: AnyObject {
     func locationManager(_ manager: LocationManager, didUpdateLocation location: CLLocation)
     func locationManager(_ manager: LocationManager, didFailWithError error: Error)
     func locationManager(_ manager: LocationManager, didChangeAuthorizationStatus status: CLAuthorizationStatus)
     func locationManager(_ manager: LocationManager, didUpdateLocationStatus status: LocationStatus)
+    // Optionally: notify when permission alert is needed
+    func locationManagerRequiresPermissionAlert(_ manager: LocationManager)
 }
 
 enum LocationStatus {
@@ -17,15 +20,13 @@ enum LocationStatus {
 }
 
 enum LocationAccuracy {
-    case high      // kCLLocationAccuracyBest
-    case medium    // kCLLocationAccuracyNearestTenMeters
-    case low       // kCLLocationAccuracyHundredMeters
-    case navigation // kCLLocationAccuracyBestForNavigation
+    case high
+    case medium
+    case low
+    case navigation
 }
 
 class LocationManager: NSObject {
-    
-    // MARK: - Properties
     static let shared = LocationManager()
     
     weak var delegate: LocationManagerDelegate?
@@ -33,42 +34,36 @@ class LocationManager: NSObject {
     private let locationManager = CLLocationManager()
     private var currentLocation: CLLocation?
     private var isBackgroundTrackingEnabled = false
-    private var updateInterval: TimeInterval = 5.0 // 5 seconds default
+    private var updateInterval: TimeInterval = 5.0
     private var locationUpdateTimer: Timer?
     private var lastLocationUpdate: Date?
+    private var permissionAlertShown = false // ⭐️ Track if alert has been shown
     
-    // Location caching
     private var cachedLocation: CLLocation?
-    private var cacheExpiryTime: TimeInterval = 30.0 // 30 seconds
-    
-    // Settings
+    private var cacheExpiryTime: TimeInterval = 30.0
+
     var desiredAccuracy: LocationAccuracy = .high {
         didSet { updateLocationAccuracy() }
     }
     var minimumDistanceFilter: CLLocationDistance = 10.0 {
         didSet { locationManager.distanceFilter = minimumDistanceFilter }
     }
-    
-    /// Current system authorization status
     var authorizationStatus: CLAuthorizationStatus {
         CLLocationManager.authorizationStatus()
     }
-    
-    // MARK: - Initialization
+
     override init() {
         super.init()
         setupLocationManager()
     }
-    
-    // MARK: - Setup
+
     private func setupLocationManager() {
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = minimumDistanceFilter
         locationManager.pausesLocationUpdatesAutomatically = false
-        // Don't set allowsBackgroundLocationUpdates here!
     }
-    
+
     private func updateLocationAccuracy() {
         switch desiredAccuracy {
         case .high:
@@ -81,24 +76,43 @@ class LocationManager: NSObject {
             locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         }
     }
-    
+
     // MARK: - Public Methods
 
-    /// Expose standard API (for MainViewController) // ⭐️
     func requestWhenInUseAuthorization() {
         locationManager.requestWhenInUseAuthorization()
     }
-
-    /// Request location permissions
-    func requestLocationPermission() {
+    
+    /// Advanced: Explain why permission is needed before requesting (optional)
+    func showPrePermissionAlertIfNeeded(from viewController: UIViewController) {
+        guard CLLocationManager.authorizationStatus() == .notDetermined else { return }
+        let alert = UIAlertController(
+            title: "Location Access Needed",
+            message: "Zoobox needs your location to show nearby services, enable deliveries, and track orders in the background.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Allow", style: .default) { _ in
+            self.requestLocationPermission()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+        viewController.present(alert, animated: true)
+    }
+    
+    /// Request location permissions (with advanced handling)
+    func requestLocationPermission(from viewController: UIViewController? = nil) {
         let status = CLLocationManager.authorizationStatus()
         switch status {
         case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
         case .denied, .restricted:
+            // ⭐️ Show custom alert if possible
+            if let vc = viewController {
+                self.showPermissionDeniedAlert(on: vc)
+            } else {
+                delegate?.locationManagerRequiresPermissionAlert(self)
+            }
             delegate?.locationManager(self, didChangeAuthorizationStatus: status)
         case .authorizedWhenInUse:
-            // Request always authorization for background tracking
             locationManager.requestAlwaysAuthorization()
         case .authorizedAlways:
             delegate?.locationManager(self, didChangeAuthorizationStatus: status)
@@ -106,8 +120,27 @@ class LocationManager: NSObject {
             break
         }
     }
-    
-    /// Start real-time location updates (foreground only, not background)
+
+    /// Advanced: Show alert when permission denied/restricted ⭐️
+    func showPermissionDeniedAlert(on viewController: UIViewController) {
+        guard !permissionAlertShown else { return }
+        permissionAlertShown = true
+        let alert = UIAlertController(
+            title: "Location Permission Needed",
+            message: "Please enable location permissions in Settings to use Zoobox's location-based features and background tracking.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default, handler: { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        }))
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: { _ in
+            self.permissionAlertShown = false
+        }))
+        viewController.present(alert, animated: true)
+    }
+
     func startRealTimeTracking(interval: TimeInterval = 5.0) {
         updateInterval = interval
         
@@ -122,7 +155,6 @@ class LocationManager: NSObject {
             return
         }
         
-        // Disable background tracking if running
         locationManager.allowsBackgroundLocationUpdates = false
         isBackgroundTrackingEnabled = false
         
@@ -131,7 +163,6 @@ class LocationManager: NSObject {
         startLocationUpdateTimer()
     }
     
-    /// Stop real-time location updates
     func stopRealTimeTracking() {
         locationManager.stopUpdatingLocation()
         stopLocationUpdateTimer()
@@ -139,7 +170,6 @@ class LocationManager: NSObject {
         isBackgroundTrackingEnabled = false
     }
     
-    /// Start background location tracking (must have .authorizedAlways)
     func startBackgroundTracking() {
         guard CLLocationManager.authorizationStatus() == .authorizedAlways else {
             delegate?.locationManager(self, didUpdateLocationStatus: .noPermission)
@@ -152,7 +182,6 @@ class LocationManager: NSObject {
         print("🗺️ Background location tracking started")
     }
     
-    /// Stop background location tracking
     func stopBackgroundTracking() {
         isBackgroundTrackingEnabled = false
         locationManager.allowsBackgroundLocationUpdates = false
@@ -160,15 +189,12 @@ class LocationManager: NSObject {
         print("🗺️ Background location tracking stopped")
     }
     
-    /// Get current location (cached if recent)
     func getCurrentLocation(completion: @escaping (CLLocation?, Error?) -> Void) {
-        // Return cached location if recent
         if let cached = cachedLocation,
            Date().timeIntervalSince(cached.timestamp) < cacheExpiryTime {
             completion(cached, nil)
             return
         }
-        // Request fresh location
         requestSingleLocation { [weak self] location, error in
             if let location = location {
                 self?.cachedLocation = location
@@ -177,7 +203,6 @@ class LocationManager: NSObject {
         }
     }
     
-    /// Get location data dictionary for WebView injection
     func getLocationForWebView() -> [String: Any]? {
         guard let location = currentLocation else { return nil }
         return [
@@ -188,11 +213,9 @@ class LocationManager: NSObject {
             "altitudeAccuracy": location.verticalAccuracy,
             "heading": location.course,
             "speed": location.speed,
-            "timestamp": location.timestamp.timeIntervalSince1970 * 1000 // JS timestamp
+            "timestamp": location.timestamp.timeIntervalSince1970 * 1000
         ]
     }
-    
-    // MARK: - Private Methods
     
     private func requestSingleLocation(completion: @escaping (CLLocation?, Error?) -> Void) {
         guard CLLocationManager.locationServicesEnabled() else {
@@ -206,7 +229,6 @@ class LocationManager: NSObject {
         }
         locationManager.requestLocation()
         singleLocationCompletion = completion
-        // Timeout after 10 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             if self?.singleLocationCompletion != nil {
                 self?.singleLocationCompletion?(nil, LocationError.timeout)
@@ -234,7 +256,6 @@ class LocationManager: NSObject {
     }
     
     private func isLocationValid(_ location: CLLocation) -> Bool {
-        // Filter out old or inaccurate locations
         let locationAge = Date().timeIntervalSince(location.timestamp)
         guard locationAge < 5.0 else { return false }
         guard location.horizontalAccuracy >= 0 && location.horizontalAccuracy < 100 else { return false }
@@ -246,13 +267,11 @@ class LocationManager: NSObject {
 extension LocationManager: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        // Handle single location request
         if let completion = singleLocationCompletion {
             singleLocationCompletion = nil
             completion(location, nil)
             return
         }
-        // Validate location
         guard isLocationValid(location) else {
             print("🗺️ Invalid location received, ignoring")
             return
@@ -266,7 +285,6 @@ extension LocationManager: CLLocationManagerDelegate {
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("🗺️ Location error: \(error.localizedDescription)")
-        // Handle single location request error
         if let completion = singleLocationCompletion {
             singleLocationCompletion = nil
             completion(nil, error)
@@ -284,11 +302,11 @@ extension LocationManager: CLLocationManagerDelegate {
                 startBackgroundTracking()
             }
         case .authorizedWhenInUse:
-            // Can start foreground tracking
             break
         case .denied, .restricted:
             stopRealTimeTracking()
             stopBackgroundTracking()
+            permissionAlertShown = false // ⭐️ allow alert to show again
         default:
             break
         }
@@ -301,7 +319,6 @@ enum LocationError: LocalizedError {
     case noPermission
     case timeout
     case invalidLocation
-
     var errorDescription: String? {
         switch self {
         case .locationServicesDisabled: return "Location services are disabled"
@@ -311,3 +328,6 @@ enum LocationError: LocalizedError {
         }
     }
 }
+
+
+

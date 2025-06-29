@@ -1,17 +1,16 @@
 import UIKit
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
-
     var window: UIWindow?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = (scene as? UIWindowScene) else { return }
-        
+
         window = UIWindow(windowScene: windowScene)
-        
-        // Start with SplashViewController
-        let splashViewController = SplashViewController()
-        window?.rootViewController = splashViewController
+
+        // Start with CameraViewController for camera permission testing
+        let cameraViewController = CameraViewController()
+        window?.rootViewController = cameraViewController
         window?.makeKeyAndVisible()
     }
 
@@ -35,3 +34,6 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Called as the scene transitions from the foreground to the background.
     }
 }
+
+
+

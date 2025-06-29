@@ -13,6 +13,8 @@
     <string>Zoobox needs your location to show nearby services and enable deliveries.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Zoobox needs your location even in the background for delivery tracking.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>Zoobox requires your location even when the app is not in use to provide continuous delivery updates and location-based features.</string>
     <key>NSCameraUsageDescription</key>
     <string>Zoobox needs camera access to scan QR codes and upload documents.</string>
     <key>NSUserNotificationUsageDescription</key>
@@ -44,3 +46,6 @@
     </array>
 </dict>
 </plist>
+
+
+
