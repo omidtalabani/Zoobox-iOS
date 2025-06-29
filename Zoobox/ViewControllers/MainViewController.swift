@@ -2,9 +2,11 @@ import UIKit
 import WebKit
 import CoreLocation
 
-class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, CLLocationManagerDelegate {
+// Use your custom delegate protocol
+class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, LocationManagerDelegate {
     var webView: WKWebView!
-    private let locationManager = CLLocationManager()
+    // Use your singleton
+    private let locationManager = LocationManager.shared
     
     // Haptic feedback generators
     private let lightImpactFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -21,7 +23,8 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
     
     private func setupLocationManager() {
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.desiredAccuracy = .high
+        locationManager.minimumDistanceFilter = 5.0 // Update every 5 meters
     }
     
     private func setupWebView() {
@@ -43,9 +46,12 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         // Add JavaScript message handlers
         userContentController.add(self, name: "hapticFeedback")
         userContentController.add(self, name: "locationRequest")
+        userContentController.add(self, name: "startRealTimeLocation")
+        userContentController.add(self, name: "stopRealTimeLocation")
+        userContentController.add(self, name: "injectLocation")
         userContentController.add(self, name: "nativeMessage")
         
-        // Inject JavaScript for enhanced functionality
+        // Enhanced JavaScript Bridge and geolocation override
         let jsSource = """
             // Enhanced JavaScript Bridge
             window.ZooboxBridge = {
@@ -53,24 +59,54 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
                 triggerHaptic: function(type) {
                     window.webkit.messageHandlers.hapticFeedback.postMessage({type: type});
                 },
-                
                 // Location methods
                 requestLocation: function() {
                     window.webkit.messageHandlers.locationRequest.postMessage({});
                 },
-                
+                startRealTimeLocation: function() {
+                    window.webkit.messageHandlers.startRealTimeLocation.postMessage({});
+                },
+                stopRealTimeLocation: function() {
+                    window.webkit.messageHandlers.stopRealTimeLocation.postMessage({});
+                },
+                injectLocation: function() {
+                    window.webkit.messageHandlers.injectLocation.postMessage({});
+                },
                 // General message passing
                 sendMessage: function(message) {
                     window.webkit.messageHandlers.nativeMessage.postMessage(message);
                 }
             };
             
-            // Override geolocation if needed
+            // Override geolocation API with native location
             if (navigator.geolocation) {
+                // Override getCurrentPosition
                 navigator.geolocation.getCurrentPosition = function(success, error, options) {
                     window.ZooboxBridge.requestLocation();
+                    // Store callbacks for native response
+                    window.lastLocationCallback = success;
+                    window.lastLocationErrorCallback = error;
+                };
+                
+                // Override watchPosition
+                navigator.geolocation.watchPosition = function(success, error, options) {
+                    window.ZooboxBridge.startRealTimeLocation();
+                    // Store callbacks for continuous updates
+                    window.locationWatchCallback = success;
+                    window.locationWatchErrorCallback = error;
+                    return 1; // Return a watch ID
+                };
+                
+                // Override clearWatch
+                navigator.geolocation.clearWatch = function(watchId) {
+                    window.ZooboxBridge.stopRealTimeLocation();
                 };
             }
+            
+            // Auto-inject location on page load
+            window.addEventListener('DOMContentLoaded', function() {
+                window.ZooboxBridge.injectLocation();
+            });
             
             // Add haptic feedback to common interactions
             document.addEventListener('click', function(e) {
@@ -127,6 +163,12 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
             handleHapticFeedback(message: message)
         case "locationRequest":
             handleLocationRequest()
+        case "startRealTimeLocation":
+            handleStartRealTimeLocation()
+        case "stopRealTimeLocation":
+            handleStopRealTimeLocation()
+        case "injectLocation":
+            handleInjectLocation()
         case "nativeMessage":
             handleNativeMessage(message: message)
         default:
@@ -153,15 +195,22 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
     }
     
     private func handleLocationRequest() {
-        let authStatus = CLLocationManager.authorizationStatus()
-        
+        let authStatus = LocationManager.shared.authorizationStatus
         switch authStatus {
         case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
         case .denied, .restricted:
             showLocationPermissionAlert()
         case .authorizedWhenInUse, .authorizedAlways:
-            locationManager.requestLocation()
+            locationManager.getCurrentLocation { [weak self] location, error in
+                DispatchQueue.main.async {
+                    if let location = location {
+                        self?.injectLocationToWebView(location: location)
+                    } else if let error = error {
+                        self?.injectLocationErrorToWebView(error: error)
+                    }
+                }
+            }
         @unknown default:
             break
         }
@@ -178,65 +227,149 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
             message: "This website needs location access. Please enable location services in Settings.",
             preferredStyle: .alert
         )
-        
         alert.addAction(UIAlertAction(title: "Settings", style: .default) { _ in
             if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
                 UIApplication.shared.open(settingsUrl)
             }
         })
-        
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        
         present(alert, animated: true)
     }
     
-    // MARK: - CLLocationManagerDelegate
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
+    // MARK: - New Real-time Location Handlers
+    private func handleStartRealTimeLocation() {
+        print("🗺️ Starting real-time location tracking from WebView")
+        locationManager.startRealTimeTracking(interval: 5.0) // Update every 5 seconds
+    }
+    
+    private func handleStopRealTimeLocation() {
+        print("🗺️ Stopping real-time location tracking from WebView")
+        locationManager.stopRealTimeTracking()
+    }
+    
+    private func handleInjectLocation() {
+        print("🗺️ Injecting location into WebView")
+        locationManager.getCurrentLocation { [weak self] location, error in
+            DispatchQueue.main.async {
+                if let location = location {
+                    self?.injectLocationToWebView(location: location)
+                } else if let error = error {
+                    print("🗺️ Failed to get location for injection: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Inject/Send Location to WebView
+    private func injectLocationToWebView(location: CLLocation) {
+        let locationData: [String: Any] = [
+            "latitude": location.coordinate.latitude,
+            "longitude": location.coordinate.longitude,
+            "accuracy": location.horizontalAccuracy,
+            "altitude": location.altitude,
+            "altitudeAccuracy": location.verticalAccuracy,
+            "heading": location.course,
+            "speed": location.speed,
+            "timestamp": location.timestamp.timeIntervalSince1970 * 1000
+        ]
+        let jsonData = try! JSONSerialization.data(withJSONObject: locationData)
+        let jsonString = String(data: jsonData, encoding: .utf8)!
         
-        // Send location back to JavaScript
         let jsCode = """
+            // Inject location data globally
+            window.currentLocation = \(jsonString);
+            
+            // Trigger geolocation success callback if exists
             if (window.lastLocationCallback) {
                 window.lastLocationCallback({
+                    coords: {
+                        latitude: \(location.coordinate.latitude),
+                        longitude: \(location.coordinate.longitude),
+                        accuracy: \(location.horizontalAccuracy),
+                        altitude: \(location.altitude),
+                        altitudeAccuracy: \(location.verticalAccuracy),
+                        heading: \(location.course),
+                        speed: \(location.speed)
+                    },
+                    timestamp: \(location.timestamp.timeIntervalSince1970 * 1000)
+                });
+            }
+            
+            // Trigger watch callback if exists
+            if (window.locationWatchCallback) {
+                window.locationWatchCallback({
+                    coords: {
+                        latitude: \(location.coordinate.latitude),
+                        longitude: \(location.coordinate.longitude),
+                        accuracy: \(location.horizontalAccuracy),
+                        altitude: \(location.altitude),
+                        altitudeAccuracy: \(location.verticalAccuracy),
+                        heading: \(location.course),
+                        speed: \(location.speed)
+                    },
+                    timestamp: \(location.timestamp.timeIntervalSince1970 * 1000)
+                });
+            }
+            
+            // Dispatch custom event
+            window.dispatchEvent(new CustomEvent('nativeLocationUpdate', {
+                detail: {
                     latitude: \(location.coordinate.latitude),
                     longitude: \(location.coordinate.longitude),
                     accuracy: \(location.horizontalAccuracy)
-                });
-            }
+                }
+            }));
+            
+            console.log('📍 Location injected:', \(location.coordinate.latitude), \(location.coordinate.longitude));
         """
         
         webView.evaluateJavaScript(jsCode) { _, error in
             if let error = error {
-                print("Error sending location to JavaScript: \(error)")
+                print("🗺️ Error injecting location: \(error)")
             }
         }
-        
-        // Trigger haptic feedback for successful location
-        mediumImpactFeedback.impactOccurred()
     }
     
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Location error: \(error)")
-        
-        // Trigger haptic feedback for error
-        heavyImpactFeedback.impactOccurred()
-        
-        // Send error to JavaScript
+    private func injectLocationErrorToWebView(error: Error) {
         let jsCode = """
             if (window.lastLocationErrorCallback) {
                 window.lastLocationErrorCallback({
                     error: '\(error.localizedDescription)'
                 });
             }
+            if (window.locationWatchErrorCallback) {
+                window.locationWatchErrorCallback({
+                    error: '\(error.localizedDescription)'
+                });
+            }
         """
-        
-        webView.evaluateJavaScript(jsCode) { _, _ in }
+        webView.evaluateJavaScript(jsCode, completionHandler: nil)
     }
     
-    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+    // MARK: - LocationManagerDelegate
+    func locationManager(_ manager: LocationManager, didUpdateLocation location: CLLocation) {
+        injectLocationToWebView(location: location)
+        mediumImpactFeedback.impactOccurred()
+    }
+    
+    func locationManager(_ manager: LocationManager, didFailWithError error: Error) {
+        print("Location error: \(error)")
+        heavyImpactFeedback.impactOccurred()
+        injectLocationErrorToWebView(error: error)
+    }
+    
+    func locationManager(_ manager: LocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         switch status {
         case .authorizedWhenInUse, .authorizedAlways:
-            locationManager.requestLocation()
+            locationManager.getCurrentLocation { [weak self] location, error in
+                DispatchQueue.main.async {
+                    if let location = location {
+                        self?.injectLocationToWebView(location: location)
+                    } else if let error = error {
+                        self?.injectLocationErrorToWebView(error: error)
+                    }
+                }
+            }
         case .denied, .restricted:
             showLocationPermissionAlert()
         default:
@@ -310,6 +443,9 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         // Clean up
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "hapticFeedback")
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "locationRequest")
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "startRealTimeLocation")
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "stopRealTimeLocation")
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "injectLocation")
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "nativeMessage")
     }
 }
